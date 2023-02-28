@@ -3,12 +3,12 @@ from __future__ import print_function
 import requests
 from bs4 import BeautifulSoup
 
-from bs4 import BeautifulSoup
+
 
 from datetime import date
 from dateutil.relativedelta import relativedelta
 import time
-from bs4 import BeautifulSoup
+
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -16,23 +16,28 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 time_start = time.time()
-
-
 SCOPES =  ['https://www.googleapis.com/auth/spreadsheets']
 
 
 DOMAINS = 'https://lms.logika.asia/group?'
 
 
-
-date_now = date.today() - relativedelta(days = (date.isoweekday(date.today())- 1))
-
+date_now = date.today()
 date_start = date_now - relativedelta(years=1)
 date_end = date_now + relativedelta(years=1)
 
 s = requests.Session()
-
-bases = ['NLB', "NVH", "PXL", "VCP"]
+try:
+    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+except FileNotFoundError:
+    flow = InstalledAppFlow.from_client_secrets_file(
+        'credentials.json', SCOPES)
+    creds = flow.run_local_server(port=0)
+    with open('token.json', 'w') as token:
+        token.write(creds.to_json())
+service = build('sheets', 'v4', credentials=creds)
+sheet = service.spreadsheets()
+bases = ['NLB', "NVH", "PXL", "VCP", '']
 
 for base in bases: 
     para = f'GroupSearch%5Bid%5D=&GroupSearch%5Btitle%5D={base}&GroupSearch%5Bvenue%5D=&GroupSearch%5Bactive_student_count%5D=&GroupSearch%5BnextLessonTime%5D=&GroupSearch%5BnextLessonNumber%5D=&GroupSearch%5BnextLessonTitle%5D=&GroupSearch%5Bteacher%5D=&GroupSearch%5Bcurator%5D=&GroupSearch%5Btype%5D=&GroupSearch%5Btype%5D%5B%5D=regular&GroupSearch%5Btype%5D%5B%5D=intensive&GroupSearch%5BcourseContentType%5D=&GroupSearch%5BcourseContentType%5D%5B%5D=course&GroupSearch%5BcourseStartTime%5D={date_start}+-+{date_now}&GroupSearch%5BcourseEndTime%5D={date_now}+-+{date_end}&presetType=active&export=true&name=default&exportType=html'
@@ -66,30 +71,28 @@ for base in bases:
     groups = []
 
 
-    try:
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    except FileNotFoundError:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'credentials.json', SCOPES)
-        creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
     # table_rows.remove(table_rows[0])
     for tr in table_rows:
         lessons = []
         group = []
         all_td = tr.find_all('td')
         group_id = all_td[0].string
-        all_li = all_td[1].find('p')      
+        group_name = all_td[1].find('a')
+        group_name = str(group_name)[str(group_name).find('>')+1:str(group_name).find('</a>')]
+        all_li = all_td[1].find('p')
+
+        campus = all_td[2].string
+        amount_student = all_td[3].string
+        next_lesson_time = all_td[4].string
         next_lesson_index = all_td[5].string
         next_lesson_name = all_td[6].find('div')
-
-        
+        next_lesson_name = str(next_lesson_name)[str(next_lesson_name).find('>')+1:str(next_lesson_name).find('</div>')]   
+        course_start_date = all_td[11].string
+        course_end_date = all_td[12].string
 
 
         if not group_id:
             continue
-        
         all_li = str(all_li)
         url = all_li[all_li.find("https"):all_li.find("</p>")]
         start = url.find("d/")
@@ -109,25 +112,23 @@ for base in bases:
                 
                 for j in values:
                     lessons.append(j[0])
-                  
-  
         except HttpError as err:
             continue
-
-               
-        group = [all_td[0].string, str(all_td[1].find('a'))[str(all_td[1].find('a')).find('>')+1:str(all_td[1].find('a')).find('</a>')], url, all_td[2].string, (all_td[3].string)[0], str(all_td[4].string).replace("\xa0", ' '),all_td[5].string, str(next_lesson_name)[str(next_lesson_name).find('>')+1:str(next_lesson_name).find('</div>')], all_td[11].string, all_td[12].string]
+        all_li = str(all_li)
+        url = all_li[all_li.find("https"):all_li.find("</p>")]
+        group = [group_id, group_name, url, campus, amount_student[0], next_lesson_time.string.replace('\xa0', ' '), next_lesson_index, next_lesson_name, course_start_date, course_end_date]
         group.extend(lessons)
         groups.append(group)
-    print(f"{base} Done")
+        
+    time_end = time.time()
+    print(f"{base} Done after {time_end - time_start}")
     resource = {
         "majorDimension": "ROWS",
-        "values": group
+        "values": groups
     }
 
     # 1D8uRbAJXBJMcF0e8tXWKe5dRbiv-EW_by-SpNAxZ3qA for testing
     # 1NkJo_leApQ2-KVGIxca3MbtxfJv7kS7Ke17Cp6fAl0M for real data update
-    service = build('sheets', 'v4', credentials=creds)
-    sheet = service.spreadsheets()
     result1 = sheet.values().update(
         spreadsheetId= "1D8uRbAJXBJMcF0e8tXWKe5dRbiv-EW_by-SpNAxZ3qA",
         range= f"'{base}'!A2",
